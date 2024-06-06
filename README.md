@@ -23,6 +23,7 @@ is a high-speed, passive reconnaissance tool designed for mapping open ports and
 ## Usage
 
 python3 spymap `<options>`
+Note: `While Spymap can be used without a Shodan API key, I recommended to use it with a free tier API key for enhanced functionality and better results.`
 
 Options
 
