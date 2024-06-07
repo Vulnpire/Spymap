@@ -7,6 +7,7 @@ from queue import Queue
 import re
 import requests
 import time
+from bs4 import BeautifulSoup
 
 VERSION = "v0.2.0"
 IPV4_REGEX = re.compile(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
@@ -47,22 +48,35 @@ def fetch_shodan_data(ip_address, api_key, verbose=False, retries=3, delay=2):
 
 # Function to fetch IPs from Shodan based on a query
 def fetch_ips_from_shodan(api_key, query, ipv4_only=False, verbose=False):
-    url = f"https://api.shodan.io/shodan/host/search?key={api_key}&query={query}"
+    url = f"https://www.shodan.io/search/facet?query={query}&facet=ip"
     try:
         response = requests.get(url)
         response.raise_for_status()
-        data = response.json()
-        ips = [match['ip_str'] for match in data['matches']]
+        soup = BeautifulSoup(response.text, 'html.parser')
+        ip_elements = soup.find_all('strong')
+        ips = [element.text.replace('"', '').replace("'", "") for element in ip_elements]
         if ipv4_only:
             ips = [ip for ip in ips if IPV4_REGEX.match(ip)]
         return ips
-    except requests.exceptions.HTTPError as http_err:
-        if verbose:
-            print(f"HTTP error occurred: {http_err}")
-    except Exception as err:
-        if verbose:
-            print(f"Other error occurred: {err}")
-    return []
+    except Exception as e:
+        print(f"Failed to fetch IPs from Shodan: {e}")
+        return []
+
+# Function to fetch IPs from Shodan based on a query
+def fetch_ips_from_shodan_old(query, ipv4_only=False):
+    url = f"https://www.shodan.io/search/facet?query={query}&facet=ip"
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.text, 'html.parser')
+        ip_elements = soup.find_all('strong')
+        ips = [element.text.replace('"', '').replace("'", "") for element in ip_elements]
+        if ipv4_only:
+            ips = [ip for ip in ips if IPV4_REGEX.match(ip)]
+        return ips, len(ips)  # Return both IPs and total count
+    except Exception as e:
+        print(f"Failed to fetch IPs from Shodan: {e}")
+        return [], 0
 
 # Function to filter ports based on exclude_ports list
 def filter_ports(ports, exclude_ports):
@@ -155,11 +169,12 @@ def main():
             sys.exit(1)
 
     if args.dl:
-        ips = fetch_ips_from_shodan(args.s, args.dl, args.ipv4_only, args.verbose)
+        # Use the old function for fetching IPs
+        ips, total_ips = fetch_ips_from_shodan_old(args.dl, args.ipv4_only)
         if ips:
             with open("ips.txt", "w") as f:
                 f.write("\n".join(ips))
-            print("IPs downloaded and saved to ips.txt")
+            print(f"IPs downloaded and saved to ips.txt. Total IPs: {total_ips}")
         else:
             if args.verbose:
                 print("No IPs found or failed to fetch IPs from Shodan")
@@ -170,12 +185,13 @@ def main():
             queries = [line.strip() for line in file if line.strip()]
         all_ips = []
         for query in queries:
-            ips = fetch_ips_from_shodan(args.s, query, args.ipv4_only, args.verbose)
+            query_formatted = f'ssl.cert.subject.CN%3A"{query}"+200+OK'
+            ips, total_ips = fetch_ips_from_shodan_old(query_formatted, args.ipv4_only)
             all_ips.extend(ips)
         if all_ips:
             with open("ips.txt", "w") as f:
                 f.write("\n".join(all_ips))
-            print("IPs downloaded and saved to ips.txt")
+            print(f"IPs downloaded and saved to ips.txt. Total IPs: {total_ips}")
         else:
             if args.verbose:
                 print("No IPs found or failed to fetch IPs from Shodan")
@@ -193,3 +209,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
