@@ -6,8 +6,9 @@ import threading
 from queue import Queue
 import re
 import requests
+import time
 
-VERSION = "v0.1.9b"
+VERSION = "v0.2.0"
 IPV4_REGEX = re.compile(r'[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}')
 
 # Class to hold Shodan response data
@@ -17,31 +18,35 @@ class ShodanResponse:
         self.asn = asn
 
 # Function to check domain and resolve its IP address
-def check_domain(domain):
+def check_domain(domain, verbose=False):
     try:
         response = requests.get(f'https://dns.google/resolve?name={domain}&type=A').json()
         ip = response['Answer'][0]['data']
         return ip
     except Exception as e:
-        print(f"Failed to resolve {domain}: {e}")
+        if verbose:
+            print(f"Failed to resolve {domain}: {e}")
         return None
 
-# Function to fetch Shodan data for a given IP address
-def fetch_shodan_data(ip_address, api_key):
+# Function to fetch Shodan data for a given IP address with retry and delay
+def fetch_shodan_data(ip_address, api_key, verbose=False, retries=3, delay=2):
     url = f"https://api.shodan.io/shodan/host/{ip_address}?key={api_key}"
-    try:
-        response = requests.get(url)
-        response.raise_for_status()
-        data = response.json()
-        ports = data.get('ports', [])
-        asn = data.get('asn', '')
-        return ShodanResponse(ports, asn)
-    except Exception as e:
-        print(f"Failed to fetch Shodan data for {ip_address}: {e}")
-        return None
+    for attempt in range(retries):
+        try:
+            response = requests.get(url)
+            response.raise_for_status()
+            data = response.json()
+            ports = data.get('ports', [])
+            asn = data.get('asn', '')
+            return ShodanResponse(ports, asn)
+        except Exception as e:
+            if verbose:
+                print(f"Attempt {attempt + 1}: Failed to fetch Shodan data for {ip_address}: {e}")
+            time.sleep(delay)
+    return None
 
 # Function to fetch IPs from Shodan based on a query
-def fetch_ips_from_shodan(api_key, query, ipv4_only=False):
+def fetch_ips_from_shodan(api_key, query, ipv4_only=False, verbose=False):
     url = f"https://api.shodan.io/shodan/host/search?key={api_key}&query={query}"
     try:
         response = requests.get(url)
@@ -52,9 +57,11 @@ def fetch_ips_from_shodan(api_key, query, ipv4_only=False):
             ips = [ip for ip in ips if IPV4_REGEX.match(ip)]
         return ips
     except requests.exceptions.HTTPError as http_err:
-        print(f"HTTP error occurred: {http_err}")
+        if verbose:
+            print(f"HTTP error occurred: {http_err}")
     except Exception as err:
-        print(f"Other error occurred: {err}")
+        if verbose:
+            print(f"Other error occurred: {err}")
     return []
 
 # Function to filter ports based on exclude_ports list
@@ -63,11 +70,11 @@ def filter_ports(ports, exclude_ports):
 
 # Worker function for each domain
 def worker(domain, show_asn, show_ip, exclude_ports, output, lock, api_key, verbose=False):
-    ip_address = check_domain(domain)
+    ip_address = check_domain(domain, verbose)
     if ip_address is None:
         return
 
-    data = fetch_shodan_data(ip_address, api_key)
+    data = fetch_shodan_data(ip_address, api_key, verbose)
     if data is None:
         return
 
@@ -143,17 +150,19 @@ def main():
         try:
             output = open(args.o, 'w')
         except IOError as e:
-            sys.stderr.write(f"error creating output file: {e}\n")
+            if args.verbose:
+                sys.stderr.write(f"error creating output file: {e}\n")
             sys.exit(1)
 
     if args.dl:
-        ips = fetch_ips_from_shodan(args.s, args.dl, args.ipv4_only)
+        ips = fetch_ips_from_shodan(args.s, args.dl, args.ipv4_only, args.verbose)
         if ips:
             with open("ips.txt", "w") as f:
                 f.write("\n".join(ips))
             print("IPs downloaded and saved to ips.txt")
         else:
-            print("No IPs found or failed to fetch IPs from Shodan")
+            if args.verbose:
+                print("No IPs found or failed to fetch IPs from Shodan")
         return
 
     if args.file:
@@ -161,14 +170,15 @@ def main():
             queries = [line.strip() for line in file if line.strip()]
         all_ips = []
         for query in queries:
-            ips = fetch_ips_from_shodan(args.s, query, args.ipv4_only)
+            ips = fetch_ips_from_shodan(args.s, query, args.ipv4_only, args.verbose)
             all_ips.extend(ips)
         if all_ips:
             with open("ips.txt", "w") as f:
                 f.write("\n".join(all_ips))
             print("IPs downloaded and saved to ips.txt")
         else:
-            print("No IPs found or failed to fetch IPs from Shodan")
+            if args.verbose:
+                print("No IPs found or failed to fetch IPs from Shodan")
         return
 
     domains = [line.strip() for line in sys.stdin if line.strip()]
