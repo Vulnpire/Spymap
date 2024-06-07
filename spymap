@@ -46,23 +46,32 @@ def fetch_shodan_data(ip_address, api_key, verbose=False, retries=3, delay=2):
             time.sleep(delay)
     return None
 
-# Function to fetch IPs from Shodan based on a query
+# darn vps fixxx
 def fetch_ips_from_shodan(api_key, query, ipv4_only=False, verbose=False):
-    url = f"https://www.shodan.io/search/facet?query={query}&facet=ip"
     try:
-        response = requests.get(url)
+        headers = {'Authorization': f"Bearer {api_key}"}
+        url = f"https://www.shodan.io/search/facet?query={query}&facet=ip"
+        response = requests.get(url, headers=headers)
         response.raise_for_status()
+
         soup = BeautifulSoup(response.text, 'html.parser')
         ip_elements = soup.find_all('strong')
-        ips = [element.text.replace('"', '').replace("'", "") for element in ip_elements]
+        ips = [element.text.strip() for element in ip_elements if IPV4_REGEX.match(element.text.strip())]
+
         if ipv4_only:
             ips = [ip for ip in ips if IPV4_REGEX.match(ip)]
+
+        if verbose:
+            print(f"Found {len(ips)} IPs from Shodan for query: {query}")
+
         return ips
     except Exception as e:
-        print(f"Failed to fetch IPs from Shodan: {e}")
+        if verbose:
+            print(f"Failed to fetch IPs from Shodan: {e}")
         return []
 
-# Function to fetch IPs from Shodan based on a query
+
+# aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 def fetch_ips_from_shodan_old(query, ipv4_only=False):
     url = f"https://www.shodan.io/search/facet?query={query}&facet=ip"
     try:
